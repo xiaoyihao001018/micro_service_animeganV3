@@ -21,10 +21,12 @@ CORS(app, resources={
     }
 })
 
+
 # 添加OPTIONS请求处理
 @app.route('/convert', methods=['OPTIONS'])
 def handle_options():
     return '', 200
+
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
@@ -33,15 +35,16 @@ def get_resource_path(relative_path):
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-    
+
     return os.path.join(base_path, relative_path)
+
 
 def load_model(model_path):
     try:
         # 获取模型文件的完整路径
         full_path = get_resource_path(model_path)
         logger.info(f"模型路径: {full_path}")
-        
+
         # 检查文件是否存在
         if not os.path.exists(full_path):
             # 列出目录内容以进行调试
@@ -50,10 +53,10 @@ def load_model(model_path):
             for file in os.listdir(dir_path):
                 logger.info(f"- {file}")
             raise FileNotFoundError(f"模型文件不存在: {full_path}")
-        
+
         # 加载模型
         session = ort.InferenceSession(
-            full_path, 
+            full_path,
             providers=['CPUExecutionProvider']
         )
         logger.info("模型加载成功！")
@@ -62,38 +65,43 @@ def load_model(model_path):
         logger.error(f"模型加载失败: {str(e)}")
         raise
 
+
 def process_image(img, model_name):
     h, w = img.shape[:2]
+
     def to_8s(x):
         if 'tiny' in model_name:
             return 256 if x < 256 else x - x % 16
         else:
             return 256 if x < 256 else x - x % 8
+
     img = cv2.resize(img, (to_8s(w), to_8s(h)))
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)/ 127.5 - 1.0
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 127.5 - 1.0
     return img
 
-def convert_image(image_data, model):
+
+def convert_image(image_data, model, model_name):
     # 将图片数据转换为 OpenCV 格式
     nparr = np.frombuffer(image_data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
+
     # 处理图片
-    processed_img = process_image(img, "AnimeGANv3_PortraitSketch_25.onnx")
+    processed_img = process_image(img, model_name)
     processed_img = np.expand_dims(processed_img, axis=0)
-    
+
     # 模型推理
     x = model.get_inputs()[0].name
     fake_img = model.run(None, {x: processed_img})
-    
+
     # 后处理
     fake_img = (np.squeeze(fake_img[0]) + 1.) * 127.5
     fake_img = np.clip(fake_img, 0, 255).astype(np.uint8)
     fake_img = cv2.cvtColor(fake_img, cv2.COLOR_RGB2BGR)
-    
+
     # 转换为字节流
     _, buffer = cv2.imencode('.png', fake_img)
     return io.BytesIO(buffer.tobytes())
+
 
 @app.route('/convert', methods=['POST'])
 def convert():
@@ -101,41 +109,56 @@ def convert():
         # 调试信息
         logger.info(f"收到请求，Content-Type: {request.content_type}")
         logger.info(f"请求文件: {request.files}")
-        
+
+        # 获取模型名称参数
+        model_name = request.form.get('model_name')
+        if not model_name:
+            logger.warning("未指定模型名称")
+            return {'error': 'No model name specified'}, 400
+
+        # 验证模型文件是否存在
+        if not os.path.exists(get_resource_path(model_name)):
+            logger.warning(f"模型文件不存在: {model_name}")
+            return {'error': 'Model file not found'}, 400
+
         if 'image' not in request.files:
             logger.warning("没有找到图片文件")
             return {'error': 'No image uploaded'}, 400
-        
+
         file = request.files['image']
         if file.filename == '':
             logger.warning("文件名为空")
             return {'error': 'No selected file'}, 400
-        
+
         # 检查文件类型
         if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
             logger.warning(f"不支持的文件类型: {file.filename}")
             return {'error': 'Unsupported file type'}, 400
-        
+
         # 读取和处理图片
         image_data = file.read()
         if not image_data:
             logger.warning("图片数据为空")
             return {'error': 'Empty file'}, 400
-            
+
         logger.info(f"开始处理图片，大小: {len(image_data)} bytes")
-        result = convert_image(image_data, model)
+
+        # 加载指定的模型
+        model = load_model(model_name)
+        result = convert_image(image_data, model, model_name)
         logger.info("图片处理完成")
-        
+
         return send_file(
             result,
             mimetype='image/png',
             as_attachment=True,
             download_name='anime_style.png'
         )
-        
+
     except Exception as e:
         logger.error(f"处理失败: {str(e)}")
         return {'error': str(e)}, 500
+
 
 # 添加全局CORS处理
 @app.after_request
@@ -146,10 +169,22 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
+
+@app.route('/models', methods=['GET'])
+def get_models():
+    try:
+        # 获取根目录下所有的 .onnx 文件
+        base_path = os.path.abspath(".")
+        model_files = [f for f in os.listdir(base_path) if f.endswith('.onnx')]
+        return {'models': model_files}
+    except Exception as e:
+        logger.error(f"获取模型列表失败: {str(e)}")
+        return {'error': str(e)}, 500
+
+
 if __name__ == '__main__':
     try:
-        model = load_model("AnimeGANv3_PortraitSketch_25.onnx")
-        # 添加debug=True以查看更多信息
+        # 不在启动时加载模型,而是在请求时动态加载
         app.run(host='0.0.0.0', port=8602, debug=True)
     except Exception as e:
         logger.error(f"启动失败: {str(e)}")

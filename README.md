@@ -5,6 +5,16 @@
 ```bash
 pip install -r requirements.txt  
 pyinstaller build.spec
+
+# 1. 获取可用模型列表
+curl -X GET http://localhost:8602/models
+
+# 2. 转换图片 (使用 form-data 方式)
+curl -X POST http://localhost:8602/convert \
+  -H "Content-Type: multipart/form-data" \
+  -F "image=@/path/to/your/image.jpg" \
+  -F "model_name=AnimeGANv3_PortraitSketch_25.onnx" \
+  --output output.png
 ```
 
 Paper Title: A Novel Double-Tail Generative Adversarial Network for Fast Photo Animation.

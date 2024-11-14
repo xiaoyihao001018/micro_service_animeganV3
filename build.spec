@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import glob
 import onnxruntime as ort
 
 block_cipher = None
@@ -7,11 +8,18 @@ block_cipher = None
 # 获取 onnxruntime 路径
 ort_path = os.path.dirname(ort.__file__)
 
-# 获取模型文件的绝对路径
-model_path = os.path.abspath('AnimeGANv3_Hayao_36.onnx')
-if not os.path.exists(model_path):
-    raise FileNotFoundError(f"模型文件不存在: {model_path}")
-print(f"模型文件路径: {model_path}")  # 打印路径进行确认
+# 获取所有 .onnx 模型文件
+model_files = glob.glob('*.onnx')
+if not model_files:
+    raise FileNotFoundError("未找到任何 .onnx 模型文件")
+
+# 打印找到的模型文件
+print(f"找到以下模型文件:")
+for model in model_files:
+    print(f"- {model}")
+
+# 构建 datas 列表,包含所有模型文件
+model_datas = [(os.path.abspath(model), '.') for model in model_files]
 
 a = Analysis(
     ['app.py'],
@@ -19,10 +27,9 @@ a = Analysis(
     binaries=[
         # 添加 onnxruntime 必需的 DLL 文件
         (os.path.join(ort_path, 'capi', 'onnxruntime_providers_shared.dll'), '.'),
-        (os.path.join(ort_path, 'capi', 'onnxruntime_providers_cuda.dll'), '.'),
     ],
     datas=[
-        (model_path, '.'),  # 使用绝对路径
+        *model_datas,  # 添加所有模型文件
         (os.path.join(ort_path, 'capi'), 'onnxruntime/capi'),  # onnxruntime 相关文件
     ],
     hiddenimports=[

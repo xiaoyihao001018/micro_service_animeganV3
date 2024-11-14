@@ -7,11 +7,24 @@ from PIL import Image
 import os
 import sys
 import logging
+from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:4200"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
+
+# 添加OPTIONS请求处理
+@app.route('/convert', methods=['OPTIONS'])
+def handle_options():
+    return '', 200
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
@@ -66,7 +79,7 @@ def convert_image(image_data, model):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     # 处理图片
-    processed_img = process_image(img, "AnimeGANv3_Hayao_36.onnx")
+    processed_img = process_image(img, "AnimeGANv3_PortraitSketch_25.onnx")
     processed_img = np.expand_dims(processed_img, axis=0)
     
     # 模型推理
@@ -124,10 +137,20 @@ def convert():
         logger.error(f"处理失败: {str(e)}")
         return {'error': str(e)}, 500
 
+# 添加全局CORS处理
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', 'http://localhost:4200')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
 if __name__ == '__main__':
     try:
-        model = load_model("AnimeGANv3_Hayao_36.onnx")
-        app.run(host='0.0.0.0', port=8602)
+        model = load_model("AnimeGANv3_PortraitSketch_25.onnx")
+        # 添加debug=True以查看更多信息
+        app.run(host='0.0.0.0', port=8602, debug=True)
     except Exception as e:
         logger.error(f"启动失败: {str(e)}")
-        input("按任意键退出...")  # 防止窗口立即关闭
+        input("按任意键退出...")
